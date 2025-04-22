@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi import Request
 
-MODEL_URL = "https://proyecto-clase-despliegues.s3.us-east-2.amazonaws.com/herdnet_model_v.1.0.1.pth"
+MODEL_URL = "https://proyecto-clase-despliegues.s3.us-east-2.amazonaws.com/20220329_HerdNet_Ennedi_dataset_2023.pth"
 NUM_CLASSES = 7
 
 app = FastAPI()

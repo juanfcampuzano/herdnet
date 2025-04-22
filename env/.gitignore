@@ -1,0 +1,26 @@
+# Entornos virtuales
+venv*/
+env*/
+.venv*/
+.env*/
+
+# Cachés de Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Archivos de configuración de entorno
+.env
+.env.*
+
+# Archivos de logs
+*.log
+
+# Archivos de compilación
+build/
+dist/
+*.egg-info/
+
+# Otros
+.DS_Store
