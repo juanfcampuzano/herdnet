@@ -1,32 +1,44 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>HerdNet - Inference</title>
   <style>
     body {
-      font-family: sans-serif;
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #1e1e1e;
+      color: #f0f0f0;
+      margin: 0;
+      padding: 2rem;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 2rem;
-      background-color: #f9f9f9;
     }
-    .container {
+
+    h1 {
+      margin-bottom: 2rem;
+      color: #ffffff;
+      font-size: 2rem;
+      letter-spacing: 1px;
+    }
+
+    .controls {
+      background-color: #2b2b2b;
+      padding: 1rem;
+      border-radius: 10px;
+      margin-bottom: 2rem;
       display: flex;
-      gap: 2rem;
-      margin-top: 2rem;
+      gap: 1rem;
+      align-items: center;
+      border: 2px dashed #888;
     }
-    img {
-      width: 256px;
-      height: 256px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      object-fit: cover;
+
+    .controls input[type="file"] {
+      color: white;
     }
+
     .btn {
-      margin-top: 1rem;
       padding: 0.6rem 1.2rem;
       background-color: #4caf50;
       color: white;
@@ -34,25 +46,135 @@
       border-radius: 5px;
       cursor: pointer;
     }
+
     .btn:hover {
       background-color: #388e3c;
+    }
+
+    .main-layout {
+      display: flex;
+      gap: 2rem;
+      justify-content: center;
+      width: 100%;
+      max-width: 1300px;
+    }
+
+    .left-column, .right-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .card {
+      background-color: #2b2b2b;
+      padding: 1rem;
+      border-radius: 12px;
+      border: 2px dashed #555;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+
+    .card h3 {
+      text-align: center;
+      color: #ffffff;
+      margin-bottom: 1rem;
+    }
+
+    .card img {
+      width: 100%;
+      max-height: 20vh;
+      border-radius: 8px;
+      border: 1px solid #555;
+      object-fit: contain;
+    }
+
+    .species-entry {
+      margin-bottom: 1.5rem;
+    }
+
+    .species-entry .name {
+      font-weight: bold;
+      color: #f0f0f0;
+      margin-bottom: 0.3rem;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background-color: #444;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background-color: #4caf50;
+      transition: width 0.3s ease-in-out;
+    }
+
+    .class-predictions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+
+    .class-predictions div {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 120px;
+    }
+
+    .class-predictions img {
+      width: 100%;
+      max-height: 100px;
+      border-radius: 6px;
+      border: 1px solid #666;
+      object-fit: contain;
+    }
+
+    .class-predictions p {
+      margin: 0.3rem 0 0;
+      font-size: 0.9rem;
+      text-align: center;
+      color: #ccc;
+    }
+
+    @media (max-width: 1100px) {
+      .main-layout {
+        flex-direction: column;
+        align-items: center;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>HerdNet - Predicción de Animales</h1>
+  <h1>HerdNet - Inference</h1>
 
-  <input type="file" id="file-input" accept="image/*" />
-  <button class="btn" onclick="handlePredict()">Predecir</button>
+  <div class="controls">
+    <input type="file" id="file-input" accept="image/*" />
+    <button class="btn" onclick="handlePredict()">Predecir</button>
+  </div>
 
-  <div class="container">
-    <div>
-      <p>Imagen Original</p>
-      <img id="original-img" src="" alt="Original" />
+  <div class="main-layout">
+    <!-- Columna izquierda -->
+    <div class="left-column">
+      <div class="card">
+        <h3>Imagen Original</h3>
+        <img id="original-img" src="" alt="Original" />
+      </div>
+      <div class="card">
+        <h3>Mapas por Clase</h3>
+        <div id="class-predictions" class="class-predictions"></div>
+      </div>
     </div>
-    <div>
-      <p>Predicción Superpuesta</p>
-      <img id="prediction-img" src="" alt="Overlay" />
+
+    <!-- Columna derecha -->
+    <div class="right-column">
+      <div class="card">
+        <h3>Especies Detectadas</h3>
+        <div id="species-list"></div>
+      </div>
     </div>
   </div>
 
@@ -65,27 +187,72 @@
         return;
       }
 
-      // Mostrar imagen original
       const originalURL = URL.createObjectURL(file);
       document.getElementById("original-img").src = originalURL;
 
-      // Enviar imagen al backend
       const formData = new FormData();
       formData.append("file", file);
 
-      const overlayRes = await fetch("/predict/image/overlay", {
+      const res = await fetch("/predict/image/overlay", {
         method: "POST",
         body: formData,
       });
 
-      if (!overlayRes.ok) {
+      if (!res.ok) {
         alert("Error al predecir la imagen");
         return;
       }
 
-      const blob = await overlayRes.blob();
-      const overlayURL = URL.createObjectURL(blob);
-      document.getElementById("prediction-img").src = overlayURL;
+      const data = await res.json();
+      console.log("Respuesta del backend:", data); // debug
+
+      const speciesList = document.getElementById("species-list");
+      const predictionContainer = document.getElementById("class-predictions");
+      speciesList.innerHTML = "";
+      predictionContainer.innerHTML = "";
+
+      if (!data.species_detected || data.species_detected.length === 0) {
+        speciesList.innerHTML = "<p>No se detectaron especies.</p>";
+        return;
+      }
+
+      data.species_detected.forEach((specie) => {
+        // Lista de especies
+        const container = document.createElement("div");
+        container.className = "species-entry";
+
+        const name = document.createElement("div");
+        name.className = "name";
+        name.innerText = `${specie.name} (score: ${specie.score.toFixed(2)})`;
+
+        const bar = document.createElement("div");
+        bar.className = "progress-bar";
+
+        const fill = document.createElement("div");
+        fill.className = "progress-fill";
+        fill.style.width = `${Math.min(specie.score * 100, 100)}%`;
+
+        bar.appendChild(fill);
+        container.appendChild(name);
+        container.appendChild(bar);
+        speciesList.appendChild(container);
+
+        // Heatmaps por clase
+        if (specie.image) {
+          const wrapper = document.createElement("div");
+
+          const img = document.createElement("img");
+          img.src = specie.image;
+          img.alt = specie.name;
+
+          const caption = document.createElement("p");
+          caption.innerText = specie.name;
+
+          wrapper.appendChild(img);
+          wrapper.appendChild(caption);
+          predictionContainer.appendChild(wrapper);
+        }
+      });
     }
   </script>
 </body>

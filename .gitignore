@@ -1,0 +1,5 @@
+env/
+static/
+__pycache__/
+
+*.csv

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HerdNet - Inference</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+      background-color: #f9f9f9;
+    }
+    .container {
+      display: flex;
+      gap: 2rem;
+      margin-top: 2rem;
+    }
+    img {
+      width: 256px;
+      height: 256px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+    .btn {
+      margin-top: 1rem;
+      padding: 0.6rem 1.2rem;
+      background-color: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .btn:hover {
+      background-color: #388e3c;
+    }
+  </style>
+</head>
+<body>
+  <h1>HerdNet - Predicción de Animales</h1>
+
+  <input type="file" id="file-input" accept="image/*" />
+  <button class="btn" onclick="handlePredict()">Predecir</button>
+
+  <div class="container">
+    <div>
+      <p>Imagen Original</p>
+      <img id="original-img" src="" alt="Original" />
+    </div>
+    <div>
+      <p>Predicción Superpuesta</p>
+      <img id="prediction-img" src="" alt="Overlay" />
+    </div>
+  </div>
+
+  <script>
+    async function handlePredict() {
+      const fileInput = document.getElementById("file-input");
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Selecciona una imagen primero");
+        return;
+      }
+
+      // Mostrar imagen original
+      const originalURL = URL.createObjectURL(file);
+      document.getElementById("original-img").src = originalURL;
+
+      // Enviar imagen al backend
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const overlayRes = await fetch("/predict/image/overlay", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!overlayRes.ok) {
+        alert("Error al predecir la imagen");
+        return;
+      }
+
+      const blob = await overlayRes.blob();
+      const overlayURL = URL.createObjectURL(blob);
+      document.getElementById("prediction-img").src = overlayURL;
+    }
+  </script>
+</body>
+</html>

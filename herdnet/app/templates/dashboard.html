@@ -1,0 +1,62 @@
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8" />
+    <title>Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 2rem; background-color: #f3f3f3; }
+        canvas { max-width: 600px; margin-bottom: 2rem; }
+    </style>
+    </head>
+    <body>
+    <h1>Dashboard HerdNet</h1>
+    <p id="stats"></p>
+    <canvas id="historyChart"></canvas>
+
+    <canvas id="classChart"></canvas>
+
+    <script>
+    async function loadData() {
+        const res = await fetch("/dashboard/data");
+        const data = await res.json();
+    
+        document.getElementById("stats").innerText = `
+        Total predicciones: ${data.stats.total_predictions}
+        Última predicción: ${data.stats.last_prediction}
+        `;
+    
+        const labels = [];
+        const classTotals = {};
+    
+        data.history.forEach(entry => {
+        Object.entries(entry.class_counts).forEach(([cls, count]) => {
+            classTotals[cls] = (classTotals[cls] || 0) + count;
+        });
+        });
+    
+        const sortedClasses = Object.keys(classTotals).sort();
+        const counts = sortedClasses.map(k => classTotals[k]);
+    
+        const chart = new Chart(document.getElementById("classChart"), {
+        type: "bar",
+        data: {
+            labels: sortedClasses.map(k => `Clase ${k}`),
+            datasets: [{
+            label: "Conteo total de píxeles por clase",
+            data: counts,
+            backgroundColor: "rgba(54, 162, 235, 0.6)"
+            }]
+        },
+        options: {
+            scales: {
+            y: { beginAtZero: true }
+            }
+        }
+        });
+    }
+    loadData();
+    </script>
+    
+    </body>
+    </html>

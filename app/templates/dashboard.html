@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HerdNet - Dashboard</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #1e1e1e;
+      color: #f0f0f0;
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 2rem;
+      color: #ffffff;
+      font-size: 2rem;
+      letter-spacing: 1px;
+    }
+    .main-layout {
+      display: flex;
+      flex-direction: row;
+      gap: 2rem;
+      justify-content: center;
+      width: 100%;
+      max-width: 1300px;
+    }
+    .main-layout .card {
+      flex: 1 1 0;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+    .left-column, .right-column {
+      display: none;
+    }
+    @media (max-width: 1100px) {
+      .main-layout {
+        flex-direction: column;
+        align-items: center;
+      }
+      .main-layout .card {
+        width: 100%;
+        margin-bottom: 2rem;
+      }
+    }
+    .card {
+      background-color: #2b2b2b;
+      padding: 1rem;
+      border-radius: 12px;
+      border: 2px dashed #555;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      margin-bottom: 2rem;
+    }
+    .card h3 {
+      text-align: center;
+      color: #ffffff;
+      margin-bottom: 1rem;
+    }
+    .chart-container {
+      width: 100%;
+      min-height: 350px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    @media (max-width: 1100px) {
+      .main-layout {
+        flex-direction: column;
+        align-items: center;
+      }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>HerdNet - Dashboard</h1>
+  <div class="main-layout single-row">
+    <div class="card">
+      <h3>Distribución Histórica de Clases</h3>
+      <div class="chart-container">
+        <canvas id="pieChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Predicciones por Clase en el Tiempo</h3>
+      <div class="chart-container">
+        <canvas id="classLineChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Predicciones Totales en el Tiempo</h3>
+      <div class="chart-container">
+        <canvas id="totalLineChart"></canvas>
+      </div>
+    </div>
+  </div>
+  <script>
+    // Utility: group by
+    function groupBy(array, key) {
+      return array.reduce((result, item) => {
+        (result[item[key]] = result[item[key]] || []).push(item);
+        return result;
+      }, {});
+    }
+    // Utility: format date (YYYY-MM-DD)
+    function formatDate(isoString) {
+      return isoString.split('T')[0];
+    }
+    // Chart colors (consistent)
+    const chartColors = [
+      '#4caf50', '#2196f3', '#ff9800', '#e91e63', '#9c27b0', '#ffc107', '#00bcd4', '#f44336', '#8bc34a', '#607d8b'
+    ];
+    // Fetch and process data
+    fetch('/dashboard/data')
+      .then(res => res.json())
+      .then(json => {
+        const history = json.history || [];
+        // Pie chart: class distribution
+        const classCounts = {};
+        history.forEach(row => {
+          classCounts[row.class_name] = (classCounts[row.class_name] || 0) + 1;
+        });
+        const classLabels = Object.keys(classCounts);
+        const classData = Object.values(classCounts);
+        // Line chart: total predictions over time
+        const byDate = {};
+        history.forEach(row => {
+          const date = formatDate(row.timestamp);
+          byDate[date] = (byDate[date] || 0) + 1;
+        });
+        const sortedDates = Object.keys(byDate).sort();
+        const totalCounts = sortedDates.map(date => byDate[date]);
+        // Line chart: per-class over time
+        const classByDate = {};
+        history.forEach(row => {
+          const date = formatDate(row.timestamp);
+          if (!classByDate[row.class_name]) classByDate[row.class_name] = {};
+          classByDate[row.class_name][date] = (classByDate[row.class_name][date] || 0) + 1;
+        });
+        // For each class, build a dataset aligned to sortedDates
+        const classLineDatasets = classLabels.map((className, idx) => ({
+          label: className,
+          data: sortedDates.map(date => classByDate[className][date] || 0),
+          borderColor: chartColors[idx % chartColors.length],
+          backgroundColor: chartColors[idx % chartColors.length],
+          fill: false,
+          tension: 0.2
+        }));
+        // Pie Chart
+        new Chart(document.getElementById('pieChart'), {
+          type: 'pie',
+          data: {
+            labels: classLabels,
+            datasets: [{
+              data: classData,
+              backgroundColor: classLabels.map((_,i) => chartColors[i % chartColors.length]),
+              borderWidth: 1
+            }]
+          },
+          options: {
+            plugins: {
+              legend: { labels: { color: '#fff' } }
+            }
+          }
+        });
+        // Total Predictions Line Chart
+        new Chart(document.getElementById('totalLineChart'), {
+          type: 'line',
+          data: {
+            labels: sortedDates,
+            datasets: [{
+              label: 'Total Predicciones',
+              data: totalCounts,
+              borderColor: '#4caf50',
+              backgroundColor: 'rgba(76,175,80,0.2)',
+              fill: true,
+              tension: 0.2
+            }]
+          },
+          options: {
+            scales: {
+              x: { ticks: { color: '#fff' } },
+              y: { ticks: { color: '#fff' } }
+            },
+            plugins: {
+              legend: { labels: { color: '#fff' } }
+            }
+          }
+        });
+        // Per-class Line Chart
+        new Chart(document.getElementById('classLineChart'), {
+          type: 'line',
+          data: {
+            labels: sortedDates,
+            datasets: classLineDatasets
+          },
+          options: {
+            scales: {
+              x: { ticks: { color: '#fff' } },
+              y: { ticks: { color: '#fff' } }
+            },
+            plugins: {
+              legend: { labels: { color: '#fff' } }
+            }
+          }
+        });
+      })
+      .catch(err => {
+        document.body.innerHTML += '<div style="color:red">Error cargando datos de dashboard.</div>';
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
