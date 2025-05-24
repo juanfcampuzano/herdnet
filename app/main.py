@@ -56,7 +56,6 @@ def log_prediction(class_id: int, class_name: str):
         ])
 
 def download_model():
-    return "C:/Users/juanf/Downloads/TesisGrupo8/040_Modelo/best_model_maquina_uniandes_50epochs_86_f1.pth"
     response = requests.get(MODEL_URL)
     response.raise_for_status()
     
