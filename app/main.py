@@ -19,7 +19,7 @@ class ModelWrapper(nn.Module):
     def forward(self, x):
         out = self.model(x)
         return out, out
-MODEL_PATH = "C:/Users/juanf/Downloads/TesisGrupo8/040_Modelo/best_model_maquina_uniandes_50epochs_86_f1.pth"
+MODEL_URL = "https://proyecto-clase-despliegues.s3.us-east-2.amazonaws.com/best_model_maquina_uniandes_50epochs_86_f1.pth"
 DOWN_RATIO = 2
 NUM_CLASSES = 7
 PATCH_SIZE = 512
@@ -45,12 +45,24 @@ def log_prediction(class_id, class_name):
             writer.writerow(["timestamp", "class_id", "class_name"])
         writer.writerow([datetime.now().isoformat(), class_id, class_name])
 
+def download_model():
+    response = requests.get(MODEL_URL)
+    response.raise_for_status()
+    
+    tmp_dir = tempfile.gettempdir()
+    tmp_path = os.path.join(tmp_dir, "model.pth")
+    
+    with open(tmp_path, "wb") as f:
+        f.write(response.content)
+    
+    return tmp_path
+
 @app.on_event("startup")
 def load_model():
     global model, stitcher
-
+    model_path = download_model()
     base_model = HerdNet(num_classes=NUM_CLASSES, down_ratio=DOWN_RATIO)
-    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+    checkpoint = torch.load(model_path, map_location=device)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     base_model.load_state_dict({k.replace("model.", ""): v for k, v in state_dict.items()})
     base_model.to(DEVICE).eval()
