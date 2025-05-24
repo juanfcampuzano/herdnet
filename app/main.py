@@ -1,26 +1,29 @@
-import io
-import os
-import torch
-import requests
-import tempfile
-import csv
+import io, os, torch, requests, tempfile, csv, zipfile
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from tempfile import NamedTemporaryFile
 from animaloc.models import HerdNet
-from animaloc.eval import HerdNetStitcher
+from animaloc.eval.stitchers import HerdNetStitcher
+from animaloc.data import ImageToPatches
 from .inference import inference_from_image, inference_from_csv, render_overlay
-import zipfile
+import torch.nn as nn
+import torch.nn.functional as F
 
-MODEL_URL = "https://proyecto-clase-despliegues.s3.us-east-2.amazonaws.com/best_model_maquina_uniandes_50epochs_86_f1.pth"
+class ModelWrapper(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
 
+    def forward(self, x):
+        out = self.model(x)
+        return out, out
+MODEL_PATH = "C:/Users/juanf/Downloads/TesisGrupo8/040_Modelo/best_model_maquina_uniandes_50epochs_86_f1.pth"
 DOWN_RATIO = 2
 NUM_CLASSES = 7
 PATCH_SIZE = 512
-
-device = torch.device("cpu")
+DEVICE = torch.device("cpu")
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -29,75 +32,40 @@ model = None
 stitcher = None
 
 PREDICTION_LOG_PATH = os.path.join(os.path.dirname(__file__), "prediction_log.csv")
-
-try:
-    from .inference import CLASSES
-except ImportError:
-    CLASSES = {
-    0: 'topi',
-    1: 'buffalo',
-    2: 'kob',
-    3: 'elephant',
-    4: 'warthog',
-    5: 'waterbuck'
+CLASSES = {
+    1: 'topi', 2: 'buffalo', 3: 'kob',
+    4: 'elephant', 5: 'warthog', 6: 'waterbuck'
 }
 
-
-def log_prediction(class_id: int, class_name: str):
+def log_prediction(class_id, class_name):
     is_new = not os.path.exists(PREDICTION_LOG_PATH)
-    with open(PREDICTION_LOG_PATH, mode="a", newline='', encoding="utf-8") as csvfile:
-        writer = csv.writer(csvfile)
+    with open(PREDICTION_LOG_PATH, "a", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
         if is_new:
             writer.writerow(["timestamp", "class_id", "class_name"])
-        writer.writerow([
-            datetime.now().isoformat(),
-            class_id,
-            class_name
-        ])
-
-def download_model():
-    response = requests.get(MODEL_URL)
-    response.raise_for_status()
-    
-    tmp_dir = tempfile.gettempdir()
-    tmp_path = os.path.join(tmp_dir, "model.pth")
-    
-    with open(tmp_path, "wb") as f:
-        f.write(response.content)
-    
-    return tmp_path
+        writer.writerow([datetime.now().isoformat(), class_id, class_name])
 
 @app.on_event("startup")
 def load_model():
     global model, stitcher
-    model_path = download_model()
-    model_instance = HerdNet(num_classes=NUM_CLASSES, down_ratio=DOWN_RATIO)
 
-    checkpoint = torch.load(model_path, map_location=device)
-    print("mean:", checkpoint["mean"])
-    print("std:", checkpoint["std"])
-    print("classes:", checkpoint["classes"])
-    print("len(classes):", len(checkpoint["classes"]))
+    base_model = HerdNet(num_classes=NUM_CLASSES, down_ratio=DOWN_RATIO)
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
-    cleaned_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
+    base_model.load_state_dict({k.replace("model.", ""): v for k, v in state_dict.items()})
+    base_model.to(DEVICE).eval()
 
-    model_instance.load_state_dict(cleaned_state_dict)
-    model_instance.to(device)
-    model_instance.eval()
+    model = base_model
 
-    model = model_instance
-
+    wrapped_model = ModelWrapper(base_model)
     stitcher = HerdNetStitcher(
-        model=model,
+        model=wrapped_model,
         size=(PATCH_SIZE, PATCH_SIZE),
         overlap=0,
         down_ratio=DOWN_RATIO,
         reduction="mean",
         device_name="cpu"
     )
-
-    stitcher.device = device
-    stitcher.model.to(device)
 
 @app.post("/predict/image")
 async def predict_image(file: UploadFile = File(...)):
@@ -106,59 +74,14 @@ async def predict_image(file: UploadFile = File(...)):
         tmp.write(contents)
         tmp_path = tmp.name
 
-    output = inference_from_image(model, tmp_path, device=device)
-    output_np = output.squeeze().cpu().numpy()
+    output = inference_from_image(model, tmp_path, device=DEVICE, stitcher=stitcher)
+    pred_np = output.squeeze().cpu().numpy()
+    if pred_np.ndim == 2:
+        pred_np = pred_np[None]
 
-    import numpy as np
-    if output_np.ndim == 2:
-        output_np = np.expand_dims(output_np, axis=0)
-    class_preds = output_np[1:7]
-
-    max_scores = [class_preds[i].max() for i in range(class_preds.shape[0])]
-    predicted_class = int(np.argmax(max_scores)) + 1
-    class_name = CLASSES.get(predicted_class, str(predicted_class))
-    log_prediction(predicted_class, class_name)
-
-    return {
-        "shape": list(output.shape),
-        "output": output_np.tolist()
-    }
-
-@app.post("/predict/csv")
-async def predict_csv(csv_file: UploadFile = File(...), images: UploadFile = File(...)):
-    tmp_dir = tempfile.gettempdir()
-    csv_path = os.path.join(tmp_dir, csv_file.filename)
-    with open(csv_path, "wb") as f:
-        f.write(await csv_file.read())
-
-    root_dir = os.path.join(tmp_dir, "images")
-    os.makedirs(root_dir, exist_ok=True)
-    with zipfile.ZipFile(io.BytesIO(await images.read())) as z:
-        z.extractall(root_dir)
-
-    results = inference_from_csv(model, csv_path, root_dir, device=device)
-    return {"results": results}
-
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    with open("app/templates/index.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    with open("app/templates/dashboard.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-@app.get("/dashboard/data", response_class=JSONResponse)
-async def dashboard_data():
-    data = []
-    if os.path.exists(PREDICTION_LOG_PATH):
-        with open(PREDICTION_LOG_PATH, newline='', encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            for row in reader:
-                data.append(row)
-    return JSONResponse(content={"history": data})
-
+    best_idx = int(pred_np[1:7].max(axis=(1,2)).argmax()) + 1
+    log_prediction(best_idx, CLASSES[best_idx])
+    return {"shape": list(output.shape), "output": pred_np.tolist()}
 
 @app.post("/predict/image/overlay")
 async def predict_image_overlay(file: UploadFile = File(...)):
@@ -167,17 +90,29 @@ async def predict_image_overlay(file: UploadFile = File(...)):
         tmp.write(contents)
         tmp_path = tmp.name
 
-    output = inference_from_image(model, tmp_path, device=device)
-    output_np = output.squeeze().cpu().numpy()
+    output = inference_from_image(model, tmp_path, device=DEVICE, stitcher=stitcher)
+    pred_np = output.squeeze().cpu().numpy()
+    if pred_np.ndim == 2:
+        pred_np = pred_np[None]
 
-    import numpy as np
-    if output_np.ndim == 2:
-        output_np = np.expand_dims(output_np, axis=0)
-    class_preds = output_np[1:7]
-
-    max_scores = [class_preds[i].max() for i in range(class_preds.shape[0])]
-    predicted_class = int(np.argmax(max_scores)) + 1
-    class_name = CLASSES.get(predicted_class, str(predicted_class))
-    log_prediction(predicted_class, class_name)
-
+    best_idx = int(pred_np[1:7].max(axis=(1,2)).argmax()) + 1
+    log_prediction(best_idx, CLASSES[best_idx])
     return render_overlay(tmp_path, output)
+
+@app.get("/")
+async def root():
+    with open("app/templates/index.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/dashboard")
+async def dashboard():
+    with open("app/templates/dashboard.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/dashboard/data")
+async def dashboard_data():
+    data = []
+    if os.path.exists(PREDICTION_LOG_PATH):
+        with open(PREDICTION_LOG_PATH, newline='', encoding="utf-8") as f:
+            data = list(csv.DictReader(f))
+    return JSONResponse(content={"history": data})

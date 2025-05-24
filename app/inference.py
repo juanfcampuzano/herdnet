@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import io
 from fastapi.responses import StreamingResponse
 from sklearn.cluster import DBSCAN
+import torchvision.transforms as T
 
 from PIL import ImageDraw
 
@@ -51,24 +52,22 @@ transforms = A.Compose([
     A.Normalize(p=1.0)
 ])
 
-def inference_from_image(model, image_path, patch_size=PATCH_SIZE, device='cpu'):
+def inference_from_image(model, image_path, device='cpu', stitcher=None):
     device = torch.device(device)
     model.eval()
     model.to(device)
 
-    image = np.array(Image.open(image_path).convert("RGB"))
+    image = Image.open(image_path).convert("RGB")
 
-    transform = A.Compose([
-        A.Resize(patch_size, patch_size),
-        A.Normalize(),
-        ToTensorV2()
+    transform = T.Compose([
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
-    input_tensor = transform(image=image)["image"].unsqueeze(0).to(device)
+    image_tensor = transform(image)
 
     with torch.no_grad():
-        output = model(input_tensor)
-        return output[1] if isinstance(output, (list, tuple)) else output
+        output = stitcher(image_tensor)
+        return output
 
 def inference_from_csv(model, csv_file, root_dir, patch_size=PATCH_SIZE, device='cpu'):
     device = torch.device(device)
@@ -97,6 +96,10 @@ CLASSES = {
 }
 
 def render_overlay(image_path, prediction_tensor, threshold=0.4):
+    from matplotlib import pyplot as plt
+    import uuid
+    from PIL import ImageDraw
+
     image = Image.open(image_path).convert("RGB")
     orig_w, orig_h = image.size
     img_np = np.array(image)
@@ -105,19 +108,22 @@ def render_overlay(image_path, prediction_tensor, threshold=0.4):
     if pred.ndim == 2:
         pred = np.expand_dims(pred, axis=0)
 
+    background = pred[0]
     class_preds = pred[1:7]
     tmp_dir = "app/static/overlays"
     os.makedirs(tmp_dir, exist_ok=True)
 
-    max_scores = [class_preds[i].max() for i in range(class_preds.shape[0])]
-    best_idx = int(np.argmax(max_scores))
+    diff_maps = class_preds - background
+    best_idx = int(np.argmax([m.sum() for m in diff_maps]))
     predicted_class = best_idx + 1
-    best_score = max_scores[best_idx]
+    heatmap = diff_maps[best_idx]
+    best_score = float(heatmap.sum())
 
+    # Mostrar heatmap normal
     heatmap_img = image.resize((256, 256))
     fig, ax = plt.subplots(figsize=(3, 3))
     ax.imshow(np.array(heatmap_img))
-    ax.imshow(class_preds[best_idx], cmap="jet", alpha=0.5)
+    ax.imshow(heatmap, cmap="jet", alpha=0.5)
     ax.axis("off")
 
     filename = f"{uuid.uuid4().hex}_class{predicted_class}.png"
@@ -125,16 +131,16 @@ def render_overlay(image_path, prediction_tensor, threshold=0.4):
     fig.savefig(path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
 
-    max_score = class_preds[best_idx].max()
-    threshold = 0.8 * max_score
-    coords = np.argwhere(class_preds[best_idx] > threshold)
+    min_val = heatmap.min()
+    thresh = min_val + 0.2 * (heatmap.max() - min_val)
+    coords = np.argwhere(heatmap < thresh)
 
-    H, W = class_preds[best_idx].shape
+    H, W = heatmap.shape
     scale_y = orig_h / H
     scale_x = orig_w / W
     scaled_coords = [(int(y * scale_y), int(x * scale_x)) for y, x in coords]
 
-    clustered_coords = cluster_points(scaled_coords, eps=40)
+    clustered_coords = cluster_points(scaled_coords, eps=20)
     points_image = draw_points_on_image(image.copy(), clustered_coords, radius=15)
     points_filename = f"{uuid.uuid4().hex}_points.png"
     points_path = os.path.join(tmp_dir, points_filename)
@@ -143,7 +149,7 @@ def render_overlay(image_path, prediction_tensor, threshold=0.4):
     detected = [{
         "class_id": predicted_class,
         "name": CLASSES[predicted_class],
-        "score": float(best_score),
+        "score": best_score,
         "overlays": {
             "heatmap": f"/static/overlays/{filename}",
             "points": f"/static/overlays/{points_filename}"
@@ -151,6 +157,4 @@ def render_overlay(image_path, prediction_tensor, threshold=0.4):
     }]
 
     return JSONResponse(content={"species_detected": detected})
-
-
 
