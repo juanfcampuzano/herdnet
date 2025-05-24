@@ -62,7 +62,7 @@ def load_model():
     global model, stitcher
     model_path = download_model()
     base_model = HerdNet(num_classes=NUM_CLASSES, down_ratio=DOWN_RATIO)
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=DEVICE)
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     base_model.load_state_dict({k.replace("model.", ""): v for k, v in state_dict.items()})
     base_model.to(DEVICE).eval()
