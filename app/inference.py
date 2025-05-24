@@ -119,7 +119,6 @@ def render_overlay(image_path, prediction_tensor, threshold=0.4):
     heatmap = diff_maps[best_idx]
     best_score = float(heatmap.sum())
 
-    # Mostrar heatmap normal
     heatmap_img = image.resize((256, 256))
     fig, ax = plt.subplots(figsize=(3, 3))
     ax.imshow(np.array(heatmap_img))
