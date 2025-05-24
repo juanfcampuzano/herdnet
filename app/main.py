@@ -56,6 +56,7 @@ def log_prediction(class_id: int, class_name: str):
         ])
 
 def download_model():
+    return "C:/Users/juanf/Downloads/TesisGrupo8/040_Modelo/best_model_maquina_uniandes_50epochs_86_f1.pth"
     response = requests.get(MODEL_URL)
     response.raise_for_status()
     
@@ -74,6 +75,10 @@ def load_model():
     model_instance = HerdNet(num_classes=NUM_CLASSES, down_ratio=DOWN_RATIO)
 
     checkpoint = torch.load(model_path, map_location=device)
+    print("mean:", checkpoint["mean"])
+    print("std:", checkpoint["std"])
+    print("classes:", checkpoint["classes"])
+    print("len(classes):", len(checkpoint["classes"]))
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     cleaned_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
 
@@ -108,9 +113,10 @@ async def predict_image(file: UploadFile = File(...)):
     import numpy as np
     if output_np.ndim == 2:
         output_np = np.expand_dims(output_np, axis=0)
-    class_preds = output_np[:6]
+    class_preds = output_np[1:7]
+
     max_scores = [class_preds[i].max() for i in range(class_preds.shape[0])]
-    predicted_class = int(np.argmax(max_scores))
+    predicted_class = int(np.argmax(max_scores)) + 1
     class_name = CLASSES.get(predicted_class, str(predicted_class))
     log_prediction(predicted_class, class_name)
 
@@ -168,9 +174,10 @@ async def predict_image_overlay(file: UploadFile = File(...)):
     import numpy as np
     if output_np.ndim == 2:
         output_np = np.expand_dims(output_np, axis=0)
-    class_preds = output_np[:6]
+    class_preds = output_np[1:7]
+
     max_scores = [class_preds[i].max() for i in range(class_preds.shape[0])]
-    predicted_class = int(np.argmax(max_scores))
+    predicted_class = int(np.argmax(max_scores)) + 1
     class_name = CLASSES.get(predicted_class, str(predicted_class))
     log_prediction(predicted_class, class_name)
 
